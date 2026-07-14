@@ -92,10 +92,13 @@ STADIUM SIMULATOR CONTEXT (Real-Time Sensors):
 - Sustainability Goal: ${simContext.greenShuttleUsage || 45}% fans chose public transport.
 
 INSTRUCTIONS:
-1. Provide accurate assistance based on the context above.
-2. If the role is 'fan', focus on safety, queue times, sustainability, accessibility, and public transit.
-3. If the role is 'staff', focus on emergency protocols, volunteer dispatch, bottleneck resolution, and operations guidance.
-4. Keep the response clear, structured, and friendly. Avoid excessive length. Use markdown formatting.`;
+1. Provide highly readable, friendly, and beautifully formatted responses.
+2. Use short paragraphs (1-2 sentences max) to avoid dense blocks of text.
+3. Use bullet points or emojis when listing options, wait times, or gates.
+4. Use **bold text** to highlight important numbers, gates, or critical information.
+5. If the role is 'fan', maintain a welcoming, enthusiastic tone. Focus on making their matchday easy.
+6. If the role is 'staff', maintain a crisp, professional tone. Focus on swift operational resolutions.
+7. Keep the response easily scannable for a mobile phone screen! Avoid technical jargon.`;
 
     const result = await model.generateContent([
       { text: systemPrompt },
