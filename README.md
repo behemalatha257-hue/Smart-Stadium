@@ -33,13 +33,13 @@ graph TD
     Client <-->|REST API| Server
     Server <-->|gRPC/HTTP| Gemini
     
-    subgraph Frontend Modules
-    UI
-    Sim
-    Eco
+    subgraph FM [Frontend Modules]
+        UI
+        Sim
+        Eco
     end
     
-    Client --> Frontend Modules
+    Client --> FM
 ```
 
 ### AI Interaction Workflow
