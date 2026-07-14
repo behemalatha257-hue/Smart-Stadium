@@ -17,6 +17,52 @@ StadiumPulse AI is a real-time, Generative AI-powered dashboard designed for the
 
 ---
 
+## 🏗️ System Architecture & Workflows
+
+### High-Level Architecture
+
+```mermaid
+graph TD
+    Client[Browser Client: HTML/CSS/JS]
+    Server[Express Server: Node.js]
+    Gemini[Google Gemini API]
+    UI[Dashboard UI]
+    Sim[Simulation Engine]
+    Eco[Eco Tracker]
+
+    Client <-->|REST API| Server
+    Server <-->|gRPC/HTTP| Gemini
+    
+    subgraph Frontend Modules
+    UI
+    Sim
+    Eco
+    end
+    
+    Client --> Frontend Modules
+```
+
+### AI Interaction Workflow
+
+```mermaid
+sequenceDiagram
+    participant Fan as User (Fan/Staff)
+    participant App as Frontend (app.js)
+    participant Svr as Backend (server.js)
+    participant Gem as Gemini 3.1 Flash Lite
+    
+    Fan->>App: Submits query (Text or Voice)
+    App->>App: Gathers live stadium state (Wait times, incidents)
+    App->>Svr: POST /api/chat {query, context, role, lang}
+    Svr->>Svr: Sanitize & validate payload
+    Svr->>Gem: Construct detailed prompt with context
+    Gem-->>Svr: Generate context-aware response
+    Svr-->>App: Return JSON {reply}
+    App->>Fan: Display message & trigger TTS (if enabled)
+```
+
+---
+
 ## 🛠️ Technology Stack
 
 | Layer | Technology |
