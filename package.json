@@ -6,6 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build": "echo 'No build step required'",
     "test": "node --test tests/simulation.test.js && node --test tests/transit.test.js && node --test tests/server.test.js"
   },
   "dependencies": {
