@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StadiumPulse AI — FIFA World Cup 2026 Operations & Fan Hub</title>
+  <meta name="description" content="AI-powered stadium operations dashboard and interactive fan companion for the FIFA World Cup 2026. Optimizing crowd safety, sustainable transit, and tournament accessibility.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- App Header & Accessibility Controls -->
+  <header class="app-header" role="banner">
+    <div class="brand-section">
+      <div class="fifa-badge">FIFA 2026</div>
+      <h1>StadiumPulse <span>AI</span></h1>
+    </div>
+    
+    <div class="accessibility-bar" aria-label="Accessibility and Language Settings">
+      <!-- Font size toggles -->
+      <button class="a11y-btn" id="btn-font-toggle" aria-label="Toggle Large Font Size">Text A+</button>
+      
+      <!-- High contrast toggle -->
+      <button class="a11y-btn" id="btn-contrast-toggle" aria-label="Toggle High Contrast Mode">Contrast</button>
+
+      <!-- Language selector -->
+      <div class="lang-selector">
+        <label for="select-lang" class="sr-only" style="display:none">Select Language</label>
+        <select id="select-lang" aria-label="Select Language">
+          <option value="en">English (US)</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Grid -->
+  <main class="dashboard-container" id="main-content" role="main">
+
+    <!-- Left Column: Operations Dashboard & Live Simulator -->
+    <div class="map-section">
+      
+      <!-- Top Stats Overview Panel -->
+      <section class="stats-strip" aria-label="Stadium Live Statistics">
+        <div class="stat-card blue" id="stat-attendance" tabindex="0">
+          <div>
+            <div class="stat-label">Stadium Attendance</div>
+            <div class="stat-value" id="val-attendance">74,200</div>
+          </div>
+          <div class="stat-indicator">92% Cap</div>
+        </div>
+
+        <div class="stat-card green" id="stat-transit" tabindex="0">
+          <div>
+            <div class="stat-label">Green Transit Share</div>
+            <div class="stat-value" id="val-transit">45%</div>
+          </div>
+          <div class="stat-indicator">Goal: 60%</div>
+        </div>
+
+        <div class="stat-card gold" id="stat-wait-time" tabindex="0">
+          <div>
+            <div class="stat-label">Peak Queue Delay</div>
+            <div class="stat-value" id="val-wait">25 min</div>
+          </div>
+          <div class="stat-indicator" id="val-wait-gate">Gate D</div>
+        </div>
+
+        <div class="stat-card red" id="stat-incidents" tabindex="0">
+          <div>
+            <div class="stat-label">Active Warnings</div>
+            <div class="stat-value" id="val-incidents">0</div>
+          </div>
+          <div class="stat-indicator" id="indicator-incident">Clear</div>
+        </div>
+      </section>
+
+      <!-- Interactive SVG Stadium Map -->
+      <section class="glass-panel" aria-label="Interactive Stadium Map">
+        <div class="stadium-map-wrapper">
+          <svg viewBox="0 0 600 450" class="stadium-svg" id="stadium-layout" aria-label="Interactive Stadium Blueprint Map. Hover over sectors to view wait times.">
+            <!-- Background Pitch / Grass -->
+            <rect x="220" y="150" width="160" height="100" fill="#1b5e20" stroke="#a5d6a7" stroke-width="1.5" rx="4"/>
+            <line x1="300" y1="150" x2="300" y2="250" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="2,2"/>
+            <circle cx="300" cy="200" r="25" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+            
+            <!-- Stadium Seating Sectors (North, East, South, West) -->
+            <!-- North Sector -->
+            <path id="sector-north" class="map-sector" d="M 120 100 L 480 100 L 420 140 L 180 140 Z" />
+            <text x="300" y="125" class="stadium-text">NORTH STANDS (SEC 200)</text>
+            
+            <!-- South Sector -->
+            <path id="sector-south" class="map-sector" d="M 180 260 L 420 260 L 480 300 L 120 300 Z" />
+            <text x="300" y="285" class="stadium-text">SOUTH STANDS (SEC 100)</text>
+            
+            <!-- West Sector -->
+            <path id="sector-west" class="map-sector" d="M 100 110 L 160 150 L 160 250 L 100 290 Z" />
+            <text x="130" y="200" class="stadium-text" transform="rotate(-90 130 200)">WEST STANDS (SEC 300)</text>
+
+            <!-- East Sector -->
+            <path id="sector-east" class="map-sector" d="M 440 150 L 500 110 L 500 290 L 440 250 Z" />
+            <text x="470" y="200" class="stadium-text" transform="rotate(90 470 200)">EAST STANDS (SEC 400)</text>
+
+            <!-- Interactive Gates around the stadium -->
+            <!-- Gate A (North Gate) -->
+            <circle id="gate-a" cx="300" cy="50" r="18" class="map-sector gate-normal" />
+            <text x="300" y="53" class="stadium-text">A</text>
+            <text x="300" y="25" class="stadium-text stadium-label-title">Gate A (North)</text>
+
+            <!-- Gate B (East Gate) -->
+            <circle id="gate-b" cx="540" cy="200" r="18" class="map-sector gate-normal" />
+            <text x="540" y="203" class="stadium-text">B</text>
+            <text x="540" y="175" class="stadium-text stadium-label-title">Gate B (East)</text>
+
+            <!-- Gate C (South Gate) -->
+            <circle id="gate-c" cx="300" cy="350" r="18" class="map-sector gate-normal" />
+            <text x="300" y="353" class="stadium-text">C</text>
+            <text x="300" y="382" class="stadium-text stadium-label-title">Gate C (South)</text>
+
+            <!-- Gate D (West Gate) -->
+            <circle id="gate-d" cx="60" cy="200" r="18" class="map-sector gate-warning" />
+            <text x="60" y="203" class="stadium-text">D</text>
+            <text x="60" y="175" class="stadium-text stadium-label-title">Gate D (West)</text>
+
+            <!-- Concessions & Restroom Nodes -->
+            <!-- Food Stand West -->
+            <circle id="node-food" cx="170" cy="180" r="10" class="map-sector gate-normal" style="fill:#d4af37" />
+            <text x="170" y="165" class="stadium-text" style="font-size:7px">🍔 Food</text>
+
+            <!-- Drink Stand East -->
+            <circle id="node-drink" cx="430" cy="220" r="10" class="map-sector gate-normal" style="fill:#00b0ff" />
+            <text x="430" y="205" class="stadium-text" style="font-size:7px">🥤 Drink</text>
+
+            <!-- Restrooms Sector 1 (North-East) -->
+            <circle id="node-restroom-1" cx="410" cy="120" r="10" class="map-sector gate-normal" style="fill:#e040fb" />
+            <text x="410" y="105" class="stadium-text" style="font-size:7px">🚻 Rest 1</text>
+
+            <!-- Restrooms Sector 2 (South-West) -->
+            <circle id="node-restroom-2" cx="190" cy="280" r="10" class="map-sector gate-warning" style="fill:#e040fb" />
+            <text x="190" y="265" class="stadium-text" style="font-size:7px">🚻 Rest 2</text>
+
+            <!-- Green Transit Hub (Bottom Left) -->
+            <rect id="node-transit" x="40" y="380" width="80" height="40" fill="#2e7d32" stroke="#4caf50" stroke-width="1.5" rx="5" class="map-sector"/>
+            <text x="80" y="405" class="stadium-text">Transit Hub</text>
+          </svg>
+        </div>
+      </section>
+
+      <!-- Live Operations Simulator Console -->
+      <section class="glass-panel simulator-panel" aria-label="Operations Simulator Console">
+        <h2>📊 Operations Simulator Console</h2>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">
+          Trigger real-time incidents and surges. Watch the dashboard react and query the AI assistant to receive dynamic mitigation guidelines.
+        </p>
+        <div class="simulator-controls">
+          <button class="sim-btn active" id="btn-sim-normal" aria-label="Trigger Normal Matchday Operations Scenario">
+            <span class="btn-icon">🏟️</span> Normal Operations
+          </button>
+          <button class="sim-btn" id="btn-sim-halftime" aria-label="Trigger Halftime Concession Rush Scenario">
+            <span class="btn-icon">🍔</span> Halftime Rush
+          </button>
+          <button class="sim-btn" id="btn-sim-gated" aria-label="Trigger Gate D Bottleneck Scenario">
+            <span class="btn-icon">🚧</span> Gate D Bottleneck
+          </button>
+          <button class="sim-btn" id="btn-sim-incident" aria-label="Trigger Medical Incident Sector 102 Scenario">
+            <span class="btn-icon">🚨</span> Incident Sector 102
+          </button>
+          <button class="sim-btn" id="btn-sim-transit" aria-label="Trigger Transit Delay Scenario">
+            <span class="btn-icon">🚇</span> Metro Grid Outage
+          </button>
+        </div>
+      </section>
+
+      <!-- Sustainability & Journey Footprint Calculator -->
+      <section class="glass-panel sustainability-panel" aria-label="Sustainable Travel Hub">
+        <h2>🌿 World Cup Green Travel Tracker</h2>
+        <div class="sustainability-grid">
+          <!-- Journey Form -->
+          <div class="carbon-calculator">
+            <div class="calc-row">
+              <label for="select-transit-type">Preferred Mode of Travel</label>
+              <select id="select-transit-type">
+                <option value="ev-shuttle">Shared EV Stadium Shuttle (Zero Emission)</option>
+                <option value="metro">Metro Transit / Electric Train</option>
+                <option value="bus">Standard Diesel City Bus</option>
+                <option value="gas-car">Single Occupancy Gas Car</option>
+                <option value="flight">Aviation / Air Travel (Long Distance)</option>
+              </select>
+            </div>
+            
+            <div class="calc-row">
+              <label for="input-distance">Commute Distance (One Way, km)</label>
+              <input type="number" id="input-distance" value="15" min="1" max="10000">
+            </div>
+
+            <button class="calc-btn" id="btn-calc-carbon" aria-label="Calculate Green Journey Impact">Log Eco-Journey</button>
+          </div>
+
+          <!-- Carbon Offset and Badge Status -->
+          <div class="sustainability-results">
+            <div id="carbon-display-intro">Your estimated carbon impact:</div>
+            <div class="carbon-score-big" id="carbon-val">0.0 kg</div>
+            <div id="carbon-display-desc">Equivalent to planting 0 trees!</div>
+            
+            <!-- Pledge checklist -->
+            <div class="pledges-container">
+              <div class="pledge-item">
+                <input type="checkbox" id="pledge-metro" checked>
+                <label for="pledge-metro">I pledge to use public transit</label>
+              </div>
+              <div class="pledge-item">
+                <input type="checkbox" id="pledge-recycle">
+                <label for="pledge-recycle">I will use stadium Green Gates</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Right Column: Interactive Smart AI Assistant -->
+    <section class="glass-panel assistant-section" aria-label="StadiumPulse AI Assistant">
+      <div class="assistant-panel">
+        
+        <!-- Assistant Top Section -->
+        <div class="assistant-header">
+          <div class="assistant-title">
+            <div class="pulse-dot" id="ai-active-pulse"></div>
+            <h2 id="title-ai-assistant">Smart Fan Companion</h2>
+          </div>
+
+          <!-- Role Toggle -->
+          <div class="role-tabs" role="tablist">
+            <button class="role-tab-btn active" id="tab-fan" role="tab" aria-selected="true" aria-controls="chat-viewport">Fan</button>
+            <button class="role-tab-btn" id="tab-staff" role="tab" aria-selected="false" aria-controls="chat-viewport">Operations Staff</button>
+          </div>
+        </div>
+
+        <!-- Chat Viewport -->
+        <div class="chat-viewport" id="chat-viewport" role="log" aria-live="polite">
+          <!-- Initial Greeting -->
+          <div class="chat-bubble ai">
+            <p>Welcome to the FIFA World Cup 2026 Stadium Hub! 🏆</p>
+            <p>I am your Generative AI assistant, aware of real-time stadium queues, gates, accessibility pathways, and sustainable routes. How can I help you today?</p>
+            <button class="chat-audio-btn" aria-label="Listen to message">🔊 Read Aloud</button>
+          </div>
+        </div>
+
+        <!-- Prompt Suggestions Chips -->
+        <div class="prompt-chips" id="chips-container" aria-label="Suggested Questions">
+          <!-- Populated dynamically based on role -->
+        </div>
+
+        <!-- Console Entry Input -->
+        <form class="chat-console" id="chat-form" action="#" onsubmit="return false;">
+          <div class="chat-input-wrapper">
+            <input type="text" id="chat-input" class="chat-input" placeholder="Ask StadiumPulse AI..." autocomplete="off" aria-label="Enter your message to the AI assistant">
+            <button type="button" class="mic-btn" id="btn-mic" aria-label="Speak your message using microphone">🎤</button>
+          </div>
+          <button type="submit" class="send-btn" id="btn-send-chat" aria-label="Send message">Send</button>
+        </form>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer" role="contentinfo">
+    <p>© FIFA World Cup 2026 Stadium Operations Dashboard & Operations Co-Pilot.</p>
+    <p>Leveraging Google Gemini Generative AI for real-time decision support, safety routing, accessibility support, and carbon tracking.</p>
+  </footer>
+
+  <!-- Frontend Logic modules -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "stadium-pulse",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "FIFA World Cup 2026 Stadium Operations and Fan Experience Platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/simulation.test.js && node --test tests/transit.test.js && node --test tests/server.test.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
