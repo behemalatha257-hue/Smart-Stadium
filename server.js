@@ -199,8 +199,10 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error', message: err.message });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 StadiumPulse AI Server running on http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 StadiumPulse AI Server running on http://localhost:${PORT}`);
+  });
+}
 
 export default app;
