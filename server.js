@@ -199,7 +199,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error', message: err.message });
 });
 
-if (process.env.NODE_ENV !== 'production') {
+// Do not listen to port if running in Vercel serverless environment
+if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`🚀 StadiumPulse AI Server running on http://localhost:${PORT}`);
   });
