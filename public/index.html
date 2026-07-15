@@ -18,14 +18,14 @@
     
     <div class="accessibility-bar" aria-label="Accessibility and Language Settings">
       <!-- Font size toggles -->
-      <button class="a11y-btn" id="btn-font-toggle" aria-label="Toggle Large Font Size">Text A+</button>
+      <button class="a11y-btn" id="btn-font-toggle" aria-label="Toggle Large Font Size" aria-pressed="false">Text A+</button>
       
       <!-- High contrast toggle -->
-      <button class="a11y-btn" id="btn-contrast-toggle" aria-label="Toggle High Contrast Mode">Contrast</button>
+      <button class="a11y-btn" id="btn-contrast-toggle" aria-label="Toggle High Contrast Mode" aria-pressed="false">Contrast</button>
 
       <!-- Language selector -->
       <div class="lang-selector">
-        <label for="select-lang" class="sr-only" style="display:none">Select Language</label>
+        <label for="select-lang" class="sr-only">Select Language</label>
         <select id="select-lang" aria-label="Select Language">
           <option value="en">English (US)</option>
           <option value="es">Español</option>
@@ -170,6 +170,13 @@
             <span class="btn-icon">🚇</span> Metro Grid Outage
           </button>
         </div>
+
+        <!-- Live Crowd Intelligence Widget -->
+        <div id="crowd-intelligence-card" class="crowd-intel-card" style="display: none;" role="status">
+          <h3>🤖 Live Crowd Intelligence Intel</h3>
+          <div class="intel-badge" id="intel-severity">Severity: Low</div>
+          <ul id="intel-recommendations"></ul>
+        </div>
       </section>
 
       <!-- Sustainability & Journey Footprint Calculator -->
@@ -178,6 +185,7 @@
         <div class="sustainability-grid">
           <!-- Journey Form -->
           <div class="carbon-calculator">
+            <h3>Commute Details</h3>
             <div class="calc-row">
               <label for="select-transit-type">Preferred Mode of Travel</label>
               <select id="select-transit-type">
@@ -199,12 +207,14 @@
 
           <!-- Carbon Offset and Badge Status -->
           <div class="sustainability-results">
+            <h3>Calculated Offset</h3>
             <div id="carbon-display-intro">Your estimated carbon impact:</div>
-            <div class="carbon-score-big" id="carbon-val">0.0 kg</div>
+            <div class="carbon-score-big" id="carbon-val" role="status" aria-live="polite">0.0 kg</div>
             <div id="carbon-display-desc">Equivalent to planting 0 trees!</div>
             
             <!-- Pledge checklist -->
             <div class="pledges-container">
+              <h3>My Green Tournament Pledges</h3>
               <div class="pledge-item">
                 <input type="checkbox" id="pledge-metro" checked>
                 <label for="pledge-metro">I pledge to use public transit</label>

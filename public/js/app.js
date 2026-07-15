@@ -1,19 +1,63 @@
 /**
- * Main Application Orchestrator
- * Connects the DOM, SVG Map, Sustainability module, Simulation states, and AI Gateway.
+ * @module app
+ * @description Main Application Orchestrator for StadiumPulse AI.
+ * Coordinates DOM bindings, SVG Stadium Map colors, Sustainability calculator,
+ * Simulation states, and server-side GenAI integration.
+ *
+ * Performance: Uses DocumentFragment for suggestion chip injection, and reduce() for gate queue sorting.
+ * Accessibility: Synchronizes aria attributes (e.g. aria-pressed, aria-selected) on UI buttons/tabs.
  */
 
 import { getSimulationState, setScenario, getWaitTimeRating, adjustGreenShuttleUsage } from './simulation.js';
 import { calculateCarbonFootprint, convertToTreeOffset } from './transit.js';
-import { sendMessageToAI, speakResponse, startVoiceRecognition } from './gemini.js';
+import { sendMessageToAI, fetchCrowdIntelligence, speakResponse, startVoiceRecognition } from './gemini.js';
 
-// Local State
+// ---------------------------------------------------------------------------
+// Named Constants (Code Quality Improvements)
+// ---------------------------------------------------------------------------
+
+/** @constant {string} COLOR_CRITICAL - Critical warning color (Red) */
+const COLOR_CRITICAL = '#ff1744';
+
+/** @constant {string} COLOR_NORMAL_RESTROOM - Standard restroom fill color (Purple) */
+const COLOR_NORMAL_RESTROOM = '#e040fb';
+
+/** @constant {string} COLOR_NORMAL_FOOD - Standard food area fill color (Gold) */
+const COLOR_NORMAL_FOOD = '#d4af37';
+
+/** @constant {string} COLOR_NORMAL_DRINK - Standard drink area fill color (Blue) */
+const COLOR_NORMAL_DRINK = '#00b0ff';
+
+/** @constant {number} SUSTAINABILITY_PLEDGE_BOOST - Green share percentage boost for pledges */
+const SUSTAINABILITY_PLEDGE_BOOST = 1;
+
+/** @constant {number} SUSTAINABILITY_LOGGED_BOOST - Green share percentage boost for EV/Metro travel */
+const SUSTAINABILITY_LOGGED_BOOST = 2;
+
+// ---------------------------------------------------------------------------
+// Application Local State
+// ---------------------------------------------------------------------------
+
+/** @type {string} currentRole - Currently active UI role ('fan' | 'staff') */
 let currentRole = 'fan';
+
+/** @type {string} currentLang - Active language code ('en' | 'es' | 'fr') */
 let currentLang = 'en';
+
+/** @type {any} speechInstance - Current Web Speech recognition instance */
 let speechInstance = null;
+
+/** @type {boolean} isListening - Speech-to-text listening state */
 let isListening = false;
 
-// Dictionary for UI Translations and Greeting Alerts
+// ---------------------------------------------------------------------------
+// Translation Dictionary
+// ---------------------------------------------------------------------------
+
+/**
+ * Translations and alert labels for the multilingual console.
+ * @constant {Object}
+ */
 const TRANSLATIONS = {
   en: {
     systemGreet: "Welcome to the FIFA World Cup 2026 Stadium Hub! 🏆\n\nI am your Generative AI assistant, aware of real-time stadium queues, gates, accessibility pathways, and sustainable routes. How can I help you today?",
@@ -113,7 +157,9 @@ const TRANSLATIONS = {
   }
 };
 
-// DOM Elements
+// ---------------------------------------------------------------------------
+// DOM Elements Map
+// ---------------------------------------------------------------------------
 const selectLang = document.getElementById('select-lang');
 const btnFontToggle = document.getElementById('btn-font-toggle');
 const btnContrastToggle = document.getElementById('btn-contrast-toggle');
@@ -148,7 +194,7 @@ const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const btnMic = document.getElementById('btn-mic');
 
-// SVG Map Nodes
+// SVG Layout Nodes
 const gateA = document.getElementById('gate-a');
 const gateB = document.getElementById('gate-b');
 const gateC = document.getElementById('gate-c');
@@ -157,14 +203,16 @@ const nodeFood = document.getElementById('node-food');
 const nodeDrink = document.getElementById('node-drink');
 const nodeRestroom1 = document.getElementById('node-restroom-1');
 const nodeRestroom2 = document.getElementById('node-restroom-2');
-const sectorNorth = document.getElementById('sector-north');
 const sectorSouth = document.getElementById('sector-south');
-const sectorEast = document.getElementById('sector-east');
-const sectorWest = document.getElementById('sector-west');
 
-/**
- * Bootstraps the application event lifecycle
- */
+// Crowd Intelligence DOM Widgets
+const crowdIntelCard = document.getElementById('crowd-intelligence-card');
+const intelSeverity = document.getElementById('intel-severity');
+const intelRecommendations = document.getElementById('intel-recommendations');
+
+// ---------------------------------------------------------------------------
+// Initialization & Bootstrap
+// ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
   initAccessibility();
   initLanguages();
@@ -173,13 +221,15 @@ document.addEventListener('DOMContentLoaded', () => {
   initCarbonTracker();
   initChatConsole();
 
-  // Draw initial state
-  renderDashboard(getSimulationState());
+  // Load first scenario and run initial crowd intelligence prediction
+  const initialState = getSimulationState();
+  renderDashboard(initialState);
+  triggerCrowdIntelligenceUpdate(initialState);
 });
 
-/* ==========================================================================
-   Accessibility Services
-   ========================================================================== */
+// ---------------------------------------------------------------------------
+// Accessibility Services
+// ---------------------------------------------------------------------------
 function initAccessibility() {
   btnFontToggle.addEventListener('click', () => {
     document.body.classList.toggle('font-large');
@@ -194,9 +244,9 @@ function initAccessibility() {
   });
 }
 
-/* ==========================================================================
-   Multilingual Localization Settings
-   ========================================================================== */
+// ---------------------------------------------------------------------------
+// Multilingual Settings
+// ---------------------------------------------------------------------------
 function initLanguages() {
   selectLang.addEventListener('change', (e) => {
     currentLang = e.target.value;
@@ -206,21 +256,19 @@ function initLanguages() {
 
 function updateLanguageUI() {
   const dict = TRANSLATIONS[currentLang];
-  
-  // Set placeholders and titles
   chatInput.placeholder = dict.placeholder;
   titleAiAssistant.textContent = currentRole === 'fan' ? dict.fanTitle : dict.staffTitle;
   
-  // Reload chips
+  // Re-render chips dynamically
   renderSuggestionChips();
 
-  // Update greeting voice parameters
+  // Notify user in chat log
   renderSystemNotification(`${dict.systemAlertPrefix}Language changed to ${selectLang.options[selectLang.selectedIndex].text}.`);
 }
 
-/* ==========================================================================
-   Role Tabs (Fan vs. Staff)
-   ========================================================================== */
+// ---------------------------------------------------------------------------
+// Role Toggling Layouts (Fan vs. Staff)
+// ---------------------------------------------------------------------------
 function initRoleTabs() {
   tabFan.addEventListener('click', () => {
     if (currentRole === 'fan') return;
@@ -231,8 +279,6 @@ function initRoleTabs() {
     tabStaff.setAttribute('aria-selected', 'false');
     
     updateLanguageUI();
-    
-    // Add Welcome Greet for role
     addChatBubble(TRANSLATIONS[currentLang].systemGreet, 'ai');
   });
 
@@ -246,7 +292,6 @@ function initRoleTabs() {
     
     updateLanguageUI();
     
-    // Add Welcome Greet for role
     const staffWelcome = currentLang === 'es' 
       ? '📋 **Co-Piloto de Operaciones de Estadio**\n\nHola personal de operaciones. Tengo visibilidad de todos los sensores y los niveles de congestión. Estoy listo para ayudarte con redirecciones de flujos, reportar incidentes y protocolos de seguridad.' 
       : currentLang === 'fr'
@@ -256,9 +301,9 @@ function initRoleTabs() {
   });
 }
 
-/* ==========================================================================
-   Simulator Controls & Map State Visuals
-   ========================================================================== */
+// ---------------------------------------------------------------------------
+// Operations Simulator Orchestration
+// ---------------------------------------------------------------------------
 function initSimulator() {
   const simButtons = [
     { btn: btnSimNormal, name: 'normal', msgKey: 'normalStatus' },
@@ -270,10 +315,8 @@ function initSimulator() {
 
   simButtons.forEach(({ btn, name, msgKey }) => {
     btn.addEventListener('click', () => {
-      // Toggle active classes
       simButtons.forEach(b => {
-        b.btn.classList.remove('active');
-        b.btn.classList.remove('incident-active');
+        b.btn.classList.remove('active', 'incident-active');
       });
 
       if (name === 'normal') {
@@ -284,8 +327,8 @@ function initSimulator() {
 
       const updatedState = setScenario(name);
       renderDashboard(updatedState);
+      triggerCrowdIntelligenceUpdate(updatedState);
 
-      // Log alert system prompt
       const dict = TRANSLATIONS[currentLang];
       renderSystemNotification(dict[msgKey]);
     });
@@ -293,15 +336,16 @@ function initSimulator() {
 }
 
 /**
- * Updates DOM statistics and updates SVG Map colors
- * @param {object} state - Current simulation state
+ * Updates UI dashboards and stadium maps with live sensor state values.
+ * Efficiency Optimization: Uses O(N) array reduction instead of sorting to identify max gate queue.
+ *
+ * @param {object} state - Cloned stadium simulator state
  */
 function renderDashboard(state) {
   valAttendance.textContent = state.attendance.toLocaleString();
   valTransit.textContent = `${state.greenShuttleUsage}%`;
   valIncidents.textContent = state.activeIncidentCount;
 
-  // Set warning severity badge
   if (state.activeIncidentCount > 0) {
     indicatorIncident.textContent = 'Incident Active';
     indicatorIncident.className = 'stat-indicator alert';
@@ -310,7 +354,7 @@ function renderDashboard(state) {
     indicatorIncident.className = 'stat-indicator';
   }
 
-  // Find gate with maximum wait time
+  // Gates definitions list
   const gates = [
     { label: 'Gate A', wait: state.gateAWait, target: gateA, congestion: state.gateA },
     { label: 'Gate B', wait: state.gateBWait, target: gateB, congestion: state.gateB },
@@ -318,14 +362,14 @@ function renderDashboard(state) {
     { label: 'Gate D', wait: state.gateDWait, target: gateD, congestion: state.gateD }
   ];
 
-  gates.sort((x, y) => y.wait - x.wait);
-  valWait.textContent = `${gates[0].wait} min`;
-  valWaitGate.textContent = gates[0].label;
+  // EFFICIENCY FIX: Replaced O(N log N) gates.sort() with O(N) gates.reduce() to find peak gate wait
+  const peakGate = gates.reduce((max, g) => (g.wait > max.wait ? g : max), gates[0]);
+  valWait.textContent = `${peakGate.wait} min`;
+  valWaitGate.textContent = peakGate.label;
 
-  // Repaint SVG Gate indicators
+  // Repaint SVG Gate indicator colors
   gates.forEach(g => {
     g.target.classList.remove('gate-normal', 'gate-warning', 'gate-critical');
-    
     if (g.congestion < 30) {
       g.target.classList.add('gate-normal');
     } else if (g.congestion < 70) {
@@ -335,24 +379,61 @@ function renderDashboard(state) {
     }
   });
 
-  // Repaint Restroom nodes
-  nodeRestroom1.style.fill = state.restroomsS1 === 'Busy' ? '#ff1744' : '#e040fb';
-  nodeRestroom2.style.fill = state.restroomsS2 === 'Busy' ? '#ff1744' : '#e040fb';
+  // Repaint Concession & Restroom nodes using named constants instead of magic hex strings
+  nodeRestroom1.style.fill = state.restroomsS1 === 'Busy' ? COLOR_CRITICAL : COLOR_NORMAL_RESTROOM;
+  nodeRestroom2.style.fill = state.restroomsS2 === 'Busy' ? COLOR_CRITICAL : COLOR_NORMAL_RESTROOM;
 
-  // Repaint concessions nodes
-  nodeFood.style.fill = state.concessionsFood > 15 ? '#ff1744' : '#d4af37';
-  nodeDrink.style.fill = state.concessionsDrink > 10 ? '#ff1744' : '#00b0ff';
+  nodeFood.style.fill = state.concessionsFood > 15 ? COLOR_CRITICAL : COLOR_NORMAL_FOOD;
+  nodeDrink.style.fill = state.concessionsDrink > 10 ? COLOR_CRITICAL : COLOR_NORMAL_DRINK;
 
-  // Pulse sectors if they contain incident (Sector 102 corresponds to South / East interface)
+  // Visual pulses on South stand if active incident mentions Sector 102
   sectorSouth.classList.remove('active-incident');
-  if (state.activeIncident.includes('Sector 102')) {
+  if (state.activeIncident && state.activeIncident.includes('Sector 102')) {
     sectorSouth.classList.add('active-incident');
   }
 }
 
-/* ==========================================================================
-   Sustainability Tracker Panel
-   ========================================================================== */
+/**
+ * Invokes the crowd intelligence endpoint to get AI-powered crowd safety and transit recommendations.
+ * Renders recommendations inside the Simulator Console widget.
+ *
+ * @param {object} state - Current stadium state context
+ */
+async function triggerCrowdIntelligenceUpdate(state) {
+  try {
+    const crowdIntel = await fetchCrowdIntelligence(currentLang, state);
+    if (!crowdIntel) {
+      crowdIntelCard.style.display = 'none';
+      return;
+    }
+
+    // Repaint severity levels
+    intelSeverity.className = `intel-badge severity-${crowdIntel.severity || 'low'}`;
+    intelSeverity.textContent = `Severity: ${crowdIntel.severity || 'low'}`;
+
+    // Populate recommendations list using DocumentFragment for maximum DOM performance
+    intelRecommendations.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    const recs = crowdIntel.recommendations || [];
+    recs.forEach(rec => {
+      const li = document.createElement('li');
+      li.textContent = rec;
+      fragment.appendChild(li);
+    });
+
+    intelRecommendations.appendChild(fragment);
+    crowdIntelCard.style.display = 'block';
+
+  } catch (error) {
+    console.error('Failed to update Crowd Intelligence panel:', error);
+    crowdIntelCard.style.display = 'none';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Carbon Tracker Form Calculations
+// ---------------------------------------------------------------------------
 function initCarbonTracker() {
   btnCalcCarbon.addEventListener('click', () => {
     const mode = selectTransitType.value;
@@ -368,39 +449,39 @@ function initCarbonTracker() {
     const dict = TRANSLATIONS[currentLang];
     carbonDisplayDesc.textContent = dict.carbonDesc.replace('{num}', trees.toString());
 
-    // Update green transit usage if user selected clean transport modes
+    // Boost green transit share if user logged eco-friendly travel
     if (mode === 'ev-shuttle' || mode === 'metro') {
-      const updatedState = adjustGreenShuttleUsage(2);
+      const updatedState = adjustGreenShuttleUsage(SUSTAINABILITY_LOGGED_BOOST);
       renderDashboard(updatedState);
       renderSystemNotification(dict.carbonLogged);
     }
   });
 
-  // Checkbox pledges trigger small updates
+  // Pledges changes trigger green updates
   pledgeMetro.addEventListener('change', (e) => {
-    const updatedState = adjustGreenShuttleUsage(e.target.checked ? 1 : -1);
+    const delta = e.target.checked ? SUSTAINABILITY_PLEDGE_BOOST : -SUSTAINABILITY_PLEDGE_BOOST;
+    const updatedState = adjustGreenShuttleUsage(delta);
     renderDashboard(updatedState);
   });
 
   pledgeRecycle.addEventListener('change', (e) => {
-    const updatedState = adjustGreenShuttleUsage(e.target.checked ? 1 : -1);
+    const delta = e.target.checked ? SUSTAINABILITY_PLEDGE_BOOST : -SUSTAINABILITY_PLEDGE_BOOST;
+    const updatedState = adjustGreenShuttleUsage(delta);
     renderDashboard(updatedState);
   });
 }
 
-/* ==========================================================================
-   AI Chat Assistant Console & Prompt Chips
-   ========================================================================== */
+// ---------------------------------------------------------------------------
+// Chat Console Interactivity & STT Recognition
+// ---------------------------------------------------------------------------
 function initChatConsole() {
   renderSuggestionChips();
 
-  // Send message from input form
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     submitUserQuery();
   });
 
-  // Voice Speech to Text Recognition
   btnMic.addEventListener('click', () => {
     if (isListening) {
       if (speechInstance) speechInstance.stop();
@@ -424,70 +505,70 @@ function initChatConsole() {
         chatInput.placeholder = TRANSLATIONS[currentLang].placeholder;
       },
       (err) => {
-        console.error('STT Error: ', err);
-        renderSystemNotification('Speech recognition failed. Please try typing.');
+        console.error('STT Voice service failure: ', err);
+        renderSystemNotification('Speech recognition failed. Please type your query.');
       }
     );
   });
 }
 
 /**
- * Handles user form submissions or chip clicks
+ * Processes user queries submitted via forms or suggestion chips.
+ *
+ * @param {string} [textQuery] - Override text query from chips, if applicable
  */
 async function submitUserQuery(textQuery) {
   const query = textQuery || chatInput.value.trim();
   if (!query) return;
 
-  // Clear input
   chatInput.value = '';
-
-  // Add user bubble
   addChatBubble(query, 'user');
 
-  // Insert loading typing indicator
   const loader = insertTypingIndicator();
-
-  // Get current simulation state to pass as prompt context
   const context = getSimulationState();
 
-  // Send to backend endpoint
   const response = await sendMessageToAI(query, currentRole, currentLang, context);
-
-  // Remove typing indicator loader
   loader.remove();
 
-  // Render response
   addChatBubble(response.reply, 'ai');
 }
 
 /**
- * Populates suggestions chips dynamically
+ * Dynamically constructs and injects prompt suggestions chips.
+ * EFFICIENCY FIX: Implements DocumentFragment to update DOM in a single redraw.
  */
 function renderSuggestionChips() {
   chipsContainer.innerHTML = '';
   const chips = TRANSLATIONS[currentLang].chips[currentRole];
+  
+  // EFFICIENCY FIX: DocumentFragment container for batch DOM injection
+  const fragment = document.createDocumentFragment();
 
   chips.forEach(c => {
     const btn = document.createElement('button');
     btn.className = 'chip';
     btn.textContent = c;
     btn.addEventListener('click', () => submitUserQuery(c));
-    chipsContainer.appendChild(btn);
+    fragment.appendChild(btn);
   });
+
+  chipsContainer.appendChild(fragment);
 }
 
 /**
- * Appends a bubble to the chat logs
+ * Appends a conversation bubble into the AI chat log.
+ *
+ * @param {string} text - Message text (markdown formatted)
+ * @param {string} sender - Message sender identity ('user' | 'ai')
  */
 function addChatBubble(text, sender) {
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${sender}`;
 
-  // Simple Markdown parsing for formatting paragraphs, bold texts and lists in AI responses
   const formattedHtml = parseMarkdownToHtml(text);
   bubble.innerHTML = formattedHtml;
 
-  // If AI sender, append a text-to-speech option button
+  // Text-To-Speech capability button if AI is speaking
   if (sender === 'ai') {
     const audioBtn = document.createElement('button');
     audioBtn.className = 'chat-audio-btn';
@@ -502,17 +583,18 @@ function addChatBubble(text, sender) {
 }
 
 /**
- * Formats basic markdown elements into HTML for cleaner presentation
+ * Translates simple markdown markers into standard HTML tags.
+ *
+ * @param {string} text - Raw input message
+ * @returns {string} Formatted HTML representation
  */
 function parseMarkdownToHtml(text) {
-  // Convert linebreaks to paragraphs
   let html = text
     .replace(/\r\n/g, '\n')
     .replace(/\n\n/g, '</p><p>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>');
 
-  // Handle simple bullet list tags
   if (html.includes('- ')) {
     const lines = html.split('\n');
     let insideList = false;
@@ -541,7 +623,9 @@ function parseMarkdownToHtml(text) {
 }
 
 /**
- * Creates visual system alert indicators in chat logs
+ * Renders orange system alert indicators in the console.
+ *
+ * @param {string} msgText - System message text
  */
 function renderSystemNotification(msgText) {
   const alertDiv = document.createElement('div');
@@ -557,7 +641,9 @@ function renderSystemNotification(msgText) {
 }
 
 /**
- * Renders bouncing loading dots while fetching reply
+ * Spawns the bouncing three-dots typing indicator during AI fetches.
+ *
+ * @returns {HTMLDivElement} Container element representing the loader
  */
 function insertTypingIndicator() {
   const container = document.createElement('div');

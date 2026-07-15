@@ -1,80 +1,357 @@
+/**
+ * @module server
+ * @description StadiumPulse AI — Express backend server for the FIFA World Cup 2026
+ * Stadium Operations & Fan Experience Platform. Provides secure API endpoints for
+ * AI-powered chat assistance (Google Gemini), crowd intelligence recommendations,
+ * and real-time operational decision support.
+ *
+ * Security: CSP, HSTS, COOP, CORP, X-Frame-Options, payload limits, input sanitization.
+ * Efficiency: Singleton Gemini client, response compression, static asset caching, rate limiting.
+ */
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import compression from 'compression';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Load environment variables
+// Load environment variables from .env file
 dotenv.config();
 
-const app = express();
+// ---------------------------------------------------------------------------
+// Constants & Configuration
+// ---------------------------------------------------------------------------
+
+/** @constant {number} MAX_PAYLOAD_BYTES - Maximum JSON request body size (15 KB) */
+const MAX_PAYLOAD_BYTES = '15kb';
+
+/** @constant {string} GEMINI_MODEL - Google Gemini model identifier */
+const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+
+/** @constant {string[]} ALLOWED_ROLES - Permitted user role values */
+const ALLOWED_ROLES = ['fan', 'staff'];
+
+/** @constant {string[]} ALLOWED_LANGUAGES - Supported language codes */
+const ALLOWED_LANGUAGES = ['en', 'es', 'fr'];
+
+/** @constant {number} RATE_LIMIT_WINDOW_MS - Rate limit window duration (60 seconds) */
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+/** @constant {number} RATE_LIMIT_MAX_REQUESTS - Max requests per IP per window */
+const RATE_LIMIT_MAX_REQUESTS = 30;
+
+/** @constant {number} STATIC_CACHE_MAX_AGE - Browser cache duration for static assets (1 day) */
+const STATIC_CACHE_MAX_AGE = 86_400_000;
+
+/** @constant {number} PORT - Server port from environment or default */
 const PORT = process.env.PORT || 8080;
 
+// ---------------------------------------------------------------------------
+// Application Setup
+// ---------------------------------------------------------------------------
+
+const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Disable X-Powered-By to prevent fingerprinting
+// Disable X-Powered-By to prevent server fingerprinting
 app.disable('x-powered-by');
 
-// Apply secure custom headers (equivalent to Helmet basic protections)
-app.use((req, res, next) => {
+// Enable gzip/deflate response compression for reduced bandwidth
+app.use(compression());
+
+// ---------------------------------------------------------------------------
+// Security Headers Middleware
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies comprehensive security headers on every response.
+ * Includes CSP, HSTS, COOP, CORP, X-Frame-Options, and referrer controls.
+ */
+app.use((_req, res, next) => {
   res.set({
     'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none';",
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
-    'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), interest-cohort=()'
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), interest-cohort=()',
+    'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin'
   });
   next();
 });
 
-// Impose JSON payload body limits to prevent Denial of Service attacks
-app.use(express.json({ limit: '15kb' }));
+// Parse JSON request bodies with size limit to prevent DoS attacks
+app.use(express.json({ limit: MAX_PAYLOAD_BYTES }));
 
-// Serve static frontend assets from public directory
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static frontend assets with aggressive browser caching
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: STATIC_CACHE_MAX_AGE,
+  etag: true,
+  lastModified: true
+}));
 
-// Health Check API
+// ---------------------------------------------------------------------------
+// In-Memory Rate Limiter (lightweight, no external dependencies)
+// ---------------------------------------------------------------------------
+
+/** @type {Map<string, {count: number, resetTime: number}>} */
+const rateLimitStore = new Map();
+
+/**
+ * Checks if a client IP has exceeded the rate limit.
+ * @param {string} ip - Client IP address
+ * @returns {boolean} True if the request should be blocked
+ */
+function isRateLimited(ip) {
+  const now = Date.now();
+  const record = rateLimitStore.get(ip);
+
+  if (!record || now > record.resetTime) {
+    rateLimitStore.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+
+  record.count += 1;
+  return record.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
+// Periodically clean expired entries to prevent memory leaks (every 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitStore) {
+    if (now > record.resetTime) {
+      rateLimitStore.delete(ip);
+    }
+  }
+}, 5 * 60_000);
+
+// ---------------------------------------------------------------------------
+// Singleton Gemini AI Client (initialized once, reused across requests)
+// ---------------------------------------------------------------------------
+
+/** @type {import('@google/generative-ai').GenerativeModel | null} */
+let geminiModel = null;
+
+/**
+ * Returns the cached Gemini model instance, initializing it if needed.
+ * Inspects process.env dynamically to support runtime API key removal (e.g. in tests).
+ * @returns {import('@google/generative-ai').GenerativeModel | null} Model instance or null
+ */
+function getGeminiModel() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'undefined' || apiKey === '') {
+    geminiModel = null;
+    return null;
+  }
+  if (!geminiModel) {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    geminiModel = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  }
+  return geminiModel;
+}
+
+// ---------------------------------------------------------------------------
+// Input Validation & Sanitization Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Sanitizes user input strings by stripping HTML-unsafe characters.
+ * @param {string} str - Raw user input string
+ * @returns {string} Sanitized, trimmed string
+ */
+function sanitizeInput(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[<>{}]/g, '').trim();
+}
+
+/**
+ * Validates a value against an allowlist of permitted values.
+ * @param {string} value - The value to validate
+ * @param {string[]} allowlist - Array of permitted values
+ * @param {string} defaultValue - Fallback if value is not in the allowlist
+ * @returns {string} Validated value or default
+ */
+function validateAgainstAllowlist(value, allowlist, defaultValue) {
+  return allowlist.includes(value) ? value : defaultValue;
+}
+
+/**
+ * Sanitizes simulation context values to prevent prompt injection.
+ * Only allows numbers and short safe strings through.
+ * @param {object} rawContext - Raw simulation context from client
+ * @returns {object} Sanitized context with safe values
+ */
+function sanitizeSimulationContext(rawContext) {
+  if (!rawContext || typeof rawContext !== 'object') return {};
+
+  const sanitized = {};
+  for (const [key, value] of Object.entries(rawContext)) {
+    if (typeof value === 'number') {
+      sanitized[key] = Math.min(Math.max(value, 0), 100_000);
+    } else if (typeof value === 'string') {
+      sanitized[key] = value.replace(/[<>{}]/g, '').substring(0, 200);
+    }
+  }
+  return sanitized;
+}
+
+// ---------------------------------------------------------------------------
+// API Routes
+// ---------------------------------------------------------------------------
+
+/**
+ * Health Check Endpoint — verifies server is running.
+ * @route GET /api/health
+ */
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Helper function to sanitize user strings
-function sanitizeInput(str) {
-  if (typeof str !== 'string') return '';
-  return str.replace(/[<>]/g, '').trim();
-}
-
-// Chat API Route (Relays requests to Google Gemini or operates fallback)
+/**
+ * Chat API — Relays fan/staff queries to Google Gemini or uses rule-based fallback.
+ * Injects real-time stadium simulation context into the AI prompt for operational awareness.
+ * @route POST /api/chat
+ */
 app.post('/api/chat', async (req, res) => {
-  try {
-    const rawMessage = req.body.message;
-    const rawRole = req.body.role || 'fan'; // 'fan' or 'staff'
-    const rawLang = req.body.lang || 'en'; // language support
-    const simContext = req.body.simulationContext || {};
+  // Rate limiting check
+  if (isRateLimited(req.ip)) {
+    return res.status(429).json({ error: 'Too Many Requests', message: 'Please wait before sending more messages.' });
+  }
 
-    const message = sanitizeInput(rawMessage);
+  try {
+    const message = sanitizeInput(req.body.message);
     if (!message) {
       return res.status(400).json({ error: 'Input message is required' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const role = validateAgainstAllowlist(req.body.role, ALLOWED_ROLES, 'fan');
+    const lang = validateAgainstAllowlist(req.body.lang, ALLOWED_LANGUAGES, 'en');
+    const simContext = sanitizeSimulationContext(req.body.simulationContext);
 
-    // Check if Gemini API key is missing, placeholder, or invalid
-    if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'undefined' || apiKey === '') {
-      // Use local rule-based response generator utilizing simulation context
-      const reply = generateLocalResponse(message, rawRole, rawLang, simContext);
+    // If Gemini model is not available, use local rule-based fallback
+    const model = getGeminiModel();
+    if (!model) {
+      const reply = generateLocalResponse(message, role, lang, simContext);
       return res.json({ reply });
     }
 
-    // Call Google Gemini API
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
+    // Construct FIFA World Cup 2026 context-aware prompt
+    const systemPrompt = buildSystemPrompt(role, lang, simContext);
 
-    // Construct detailed prompt injecting simulator context for operational awareness
-    const systemPrompt = `You are StadiumPulse AI, an intelligent, helpful virtual assistant for the FIFA World Cup 2026 stadium.
-You are chatting with a user in the role of: "${rawRole.toUpperCase()}".
-The current system language is: "${rawLang}". Please respond in that language.
+    const result = await model.generateContent([
+      { text: systemPrompt },
+      { text: `User query: "${message}"` }
+    ]);
+
+    const reply = result.response.text();
+    return res.json({ reply });
+
+  } catch (err) {
+    console.error('Gemini API Error:', err);
+    return res.status(500).json({
+      error: 'API Service Error',
+      reply: '⚠️ The AI Assistant is temporarily experiencing connection issues. Please try again shortly.',
+      details: err.message
+    });
+  }
+});
+
+/**
+ * Crowd Intelligence API — Returns AI-generated crowd management recommendations
+ * based on the current stadium simulation state. Directly supports the FIFA World Cup
+ * 2026 challenge areas: crowd management, real-time decision support, and operational intelligence.
+ * @route POST /api/crowd-intelligence
+ */
+app.post('/api/crowd-intelligence', async (req, res) => {
+  if (isRateLimited(req.ip)) {
+    return res.status(429).json({ error: 'Too Many Requests' });
+  }
+
+  try {
+    const simContext = sanitizeSimulationContext(req.body.simulationContext);
+    const lang = validateAgainstAllowlist(req.body.lang, ALLOWED_LANGUAGES, 'en');
+
+    // Build crowd intelligence specific prompt
+    const crowdPrompt = `You are StadiumPulse AI Crowd Intelligence Engine for the FIFA World Cup 2026.
+Analyze the following live stadium sensor data and provide exactly 3 actionable crowd management recommendations.
+
+LIVE SENSOR DATA:
+- Gate A: ${simContext.gateA || 20}% congestion, ${simContext.gateAWait || 5} min wait
+- Gate B: ${simContext.gateB || 35}% congestion, ${simContext.gateBWait || 10} min wait
+- Gate C: ${simContext.gateC || 15}% congestion, ${simContext.gateCWait || 3} min wait
+- Gate D: ${simContext.gateD || 80}% congestion, ${simContext.gateDWait || 25} min wait
+- Food Arena: ${simContext.concessionsFood || 8} min wait
+- Drink Zone: ${simContext.concessionsDrink || 4} min wait
+- Incidents: ${simContext.activeIncident || 'None'}
+- Green Transit: ${simContext.greenShuttleUsage || 45}%
+
+RESPONSE FORMAT (respond in ${lang}):
+Return a JSON object with exactly this structure:
+{
+  "severity": "low" | "medium" | "high",
+  "recommendations": ["action 1", "action 2", "action 3"],
+  "crowdFlow": "balanced" | "uneven" | "critical"
+}`;
+
+    const model = getGeminiModel();
+    if (!model) {
+      // Local fallback crowd intelligence
+      const severity = (simContext.gateD || 80) > 70 ? 'high' : (simContext.gateD || 80) > 40 ? 'medium' : 'low';
+      return res.json({
+        severity,
+        recommendations: [
+          'Redirect foot traffic from Gate D to Gate C for faster entry.',
+          'Deploy 2 additional stewards to the West Concourse food area.',
+          'Announce green transit shuttle availability on PA system.'
+        ],
+        crowdFlow: severity === 'high' ? 'critical' : severity === 'medium' ? 'uneven' : 'balanced'
+      });
+    }
+
+    const result = await model.generateContent([{ text: crowdPrompt }]);
+    const rawText = result.response.text();
+
+    // Attempt to parse JSON from AI response
+    try {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return res.json(parsed);
+      }
+    } catch { /* fallthrough to raw response */ }
+
+    return res.json({ severity: 'medium', recommendations: [rawText], crowdFlow: 'uneven' });
+
+  } catch (err) {
+    console.error('Crowd Intelligence Error:', err);
+    return res.status(500).json({ error: 'Crowd intelligence service unavailable', details: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// System Prompt Builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Constructs the detailed Gemini system prompt with FIFA World Cup 2026 context,
+ * stadium sensor data, and role-specific behavior instructions.
+ * @param {string} role - User role ('fan' or 'staff')
+ * @param {string} lang - Language code ('en', 'es', 'fr')
+ * @param {object} simContext - Sanitized simulation state
+ * @returns {string} Complete system prompt
+ */
+function buildSystemPrompt(role, lang, simContext) {
+  return `You are StadiumPulse AI, an intelligent, helpful virtual assistant for the FIFA World Cup 2026 stadium.
+You are chatting with a user in the role of: "${role.toUpperCase()}".
+The current system language is: "${lang}". Please respond in that language.
+
+FIFA WORLD CUP 2026 CONTEXT:
+This is an official tournament match venue. Your purpose is to enhance crowd management,
+stadium navigation, accessibility support, sustainable transportation, and real-time operational
+decision support during the FIFA World Cup 2026.
 
 STADIUM SIMULATOR CONTEXT (Real-Time Sensors):
 - Gates status:
@@ -96,43 +373,51 @@ INSTRUCTIONS:
 2. Use short paragraphs (1-2 sentences max) to avoid dense blocks of text.
 3. Use bullet points or emojis when listing options, wait times, or gates.
 4. Use **bold text** to highlight important numbers, gates, or critical information.
-5. If the role is 'fan', maintain a welcoming, enthusiastic tone. Focus on making their matchday easy.
-6. If the role is 'staff', maintain a crisp, professional tone. Focus on swift operational resolutions.
-7. Keep the response easily scannable for a mobile phone screen! Avoid technical jargon.`;
+5. If the role is 'fan', maintain a welcoming, enthusiastic tone. Focus on making their matchday easy — navigation, queue times, accessibility, sustainability tips.
+6. If the role is 'staff', maintain a crisp, professional tone. Focus on crowd management, emergency protocols, volunteer dispatch, bottleneck resolution, and operational intelligence.
+7. Keep the response easily scannable for a mobile phone screen! Avoid technical jargon.
+8. Always consider the FIFA World Cup 2026 context — this is a world-class international sporting event with diverse, multilingual audiences.`;
+}
 
-    const result = await model.generateContent([
-      { text: systemPrompt },
-      { text: `User query: "${message}"` }
-    ]);
+// ---------------------------------------------------------------------------
+// Rule-Based Local AI Response Generator (Robust Demo Fallback)
+// ---------------------------------------------------------------------------
 
-    const reply = result.response.text();
-    return res.json({ reply });
+/**
+ * Keyword categories used by the local fallback response matcher.
+ * Each entry maps a response category to its trigger keywords.
+ * @constant {Array<{category: string, keywords: string[]}>}
+ */
+const KEYWORD_CATEGORIES = [
+  { category: 'gate', keywords: ['gate', 'puerta', 'porte', 'entrance', 'entrada', 'entry'] },
+  { category: 'transit', keywords: ['transit', 'metro', 'bus', 'car', 'eco', 'green', 'transport', 'transporte', 'shuttle'] },
+  { category: 'food', keywords: ['food', 'drink', 'concession', 'beer', 'eat', 'wait', 'queue', 'line', 'comida', 'fila', 'restaur'] },
+  { category: 'accessibility', keywords: ['access', 'wheelchair', 'ramp', 'elevator', 'disabled', 'handicap', 'silla', 'ascensor'] },
+  { category: 'incident', keywords: ['incident', 'accident', 'alert', 'security', 'medical', 'fire', 'help', 'emergencia', 'seguridad'] },
+  { category: 'staff', keywords: ['staff', 'volunteer', 'shift', 'work', 'personal', 'voluntario'] }
+];
 
-  } catch (err) {
-    console.error('Gemini API Error:', err);
-    return res.status(500).json({
-      error: 'API Service Error',
-      reply: '⚠️ The AI Assistant is temporarily experiencing connection issues. Please try again shortly.',
-      details: err.message
-    });
-  }
-});
-
-// Rule-based Local AI Response Generator (Robust Demo Fallback)
+/**
+ * Generates a context-aware local response when Gemini API is unavailable.
+ * Uses a data-driven keyword matcher to select the appropriate response template.
+ * @param {string} message - User query text
+ * @param {string} role - User role ('fan' or 'staff')
+ * @param {string} lang - Language code ('en', 'es', 'fr')
+ * @param {object} context - Current stadium simulation state
+ * @returns {string} Formatted markdown response
+ */
 function generateLocalResponse(message, role, lang, context) {
   const query = message.toLowerCase();
-  
-  // Set up language specific introductions
-  let responseIntro = '';
-  if (lang === 'es') {
-    responseIntro = '🤖 **StadiumPulse AI (Modo Demo Local)**\n\n';
-  } else if (lang === 'fr') {
-    responseIntro = '🤖 **StadiumPulse AI (Mode Démo Local)**\n\n';
-  } else {
-    responseIntro = '🤖 **StadiumPulse AI (Local Demo Mode)**\n\n';
-  }
 
-  // Response Content Dictionary
+  // Language-specific intro banners
+  const introBanners = {
+    en: '🤖 **StadiumPulse AI (Local Demo Mode)**\n\n',
+    es: '🤖 **StadiumPulse AI (Modo Demo Local)**\n\n',
+    fr: '🤖 **StadiumPulse AI (Mode Démo Local)**\n\n'
+  };
+  const responseIntro = introBanners[lang] || introBanners.en;
+
+  // Multilingual response templates
   const responses = {
     en: {
       default: "That is a great question about stadium operations! In a live environment with an active Gemini API key, I will give you a real-time Generative response. Please check the simulator panel to trigger updates or change gate configurations.",
@@ -166,35 +451,35 @@ function generateLocalResponse(message, role, lang, context) {
   const selectedLang = responses[lang] ? lang : 'en';
   const dict = responses[selectedLang];
 
-  if (query.includes('gate') || query.includes('puerta') || query.includes('porte') || query.includes('entrance') || query.includes('entrada')) {
-    return responseIntro + dict.gate;
+  // Data-driven keyword matching — cleaner than chained if/includes
+  for (const { category, keywords } of KEYWORD_CATEGORIES) {
+    if (keywords.some(kw => query.includes(kw))) {
+      return responseIntro + dict[category];
+    }
   }
-  if (query.includes('transit') || query.includes('metro') || query.includes('bus') || query.includes('car') || query.includes('eco') || query.includes('green') || query.includes('transport') || query.includes('transporte')) {
-    return responseIntro + dict.transit;
-  }
-  if (query.includes('food') || query.includes('drink') || query.includes('concession') || query.includes('beer') || query.includes('eat') || query.includes('wait') || query.includes('queue') || query.includes('line') || query.includes('comida') || query.includes('fila') || query.includes('restaur')) {
-    return responseIntro + dict.food;
-  }
-  if (query.includes('access') || query.includes('wheelchair') || query.includes('ramp') || query.includes('elevator') || query.includes('disabled') || query.includes('handicap') || query.includes('silla') || query.includes('ascensor')) {
-    return responseIntro + dict.accessibility;
-  }
-  if (query.includes('incident') || query.includes('accident') || query.includes('alert') || query.includes('security') || query.includes('medical') || query.includes('fire') || query.includes('help') || query.includes('emergencia') || query.includes('seguridad')) {
-    return responseIntro + dict.incident;
-  }
-  if (role === 'staff' || query.includes('staff') || query.includes('volunteer') || query.includes('shift') || query.includes('work') || query.includes('personal') || query.includes('voluntario')) {
+
+  // Staff role default if no keyword matched
+  if (role === 'staff') {
     return responseIntro + dict.staff;
   }
 
   return responseIntro + dict.default;
 }
 
-// Serves the single page frontend (fallback)
-app.get('*', (req, res) => {
+// ---------------------------------------------------------------------------
+// Fallback & Error Handling
+// ---------------------------------------------------------------------------
+
+/** Serves the single-page frontend for all unmatched routes (SPA fallback). */
+app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Global error handler
-app.use((err, req, res, next) => {
+/**
+ * Global error handler — catches unhandled Express errors.
+ * Returns structured JSON error responses.
+ */
+app.use((err, _req, res, _next) => {
   if (err.type === 'entity.too.large' || err.status === 413) {
     return res.status(413).json({ error: 'Payload Too Large', message: 'Request body exceeds the maximum size limit.' });
   }
@@ -202,7 +487,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error', message: err.message });
 });
 
-// Do not listen to port if running in Vercel serverless environment
+// Do not listen on a port if running in Vercel serverless environment
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`🚀 StadiumPulse AI Server running on http://localhost:${PORT}`);

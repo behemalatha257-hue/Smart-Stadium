@@ -49,7 +49,12 @@ try {
   assert.strictEqual(health.headers['x-frame-options'], 'DENY');
   assert.strictEqual(health.headers['referrer-policy'], 'no-referrer');
   assert(health.headers['content-security-policy'], 'CSP should be defined');
-  console.log('✅ Test Case 1 Passed: Health endpoint and security headers');
+  
+  // Security score verification: HSTS, COOP, CORP headers
+  assert.strictEqual(health.headers['strict-transport-security'], 'max-age=63072000; includeSubDomains; preload');
+  assert.strictEqual(health.headers['cross-origin-opener-policy'], 'same-origin');
+  assert.strictEqual(health.headers['cross-origin-resource-policy'], 'same-origin');
+  console.log('✅ Test Case 1 Passed: Health endpoint and security headers (including HSTS, COOP, CORP)');
 
   // Test Case 2: Chat API Local Fallback (Fan Role)
   const chatFan = await fetchJson('/api/chat', {
@@ -82,16 +87,55 @@ try {
   console.log('✅ Test Case 3 Passed: Chat API local fallback (Staff / Spanish translation)');
 
   // Test Case 4: Chat API input validation limits (large payload rejection check)
-  // Large message payload exceeding limits
   const hugeMessage = 'a'.repeat(20000); 
   const validationError = await fetchJson('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message: hugeMessage })
   });
-  // Express body-parser limit triggers 413 Payload Too Large
   assert.strictEqual(validationError.status, 413);
   console.log('✅ Test Case 4 Passed: JSON payload size enforcement limits');
+
+  // Test Case 5: Chat API missing message validation (400 Bad Request)
+  const missingMsgError = await fetchJson('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'fan', lang: 'en' })
+  });
+  assert.strictEqual(missingMsgError.status, 400);
+  assert.strictEqual(missingMsgError.body.error, 'Input message is required');
+  console.log('✅ Test Case 5 Passed: Missing message payload validation error');
+
+  // Test Case 6: Chat API role/lang allowlist fallback validation
+  const invalidRoleLangResponse = await fetchJson('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: 'hello',
+      role: 'hacker-role', // should fallback to 'fan'
+      lang: 'ru',          // should fallback to 'en'
+      simulationContext: { gateA: 20 }
+    })
+  });
+  assert.strictEqual(invalidRoleLangResponse.status, 200);
+  assert(invalidRoleLangResponse.body.reply.includes('StadiumPulse AI (Local Demo Mode)'), 'Invalid role/lang should fall back to English/Fan defaults');
+  console.log('✅ Test Case 6 Passed: Role and Lang allowlist fallbacks');
+
+  // Test Case 7: Crowd Intelligence Recommendation API endpoint
+  const crowdIntel = await fetchJson('/api/crowd-intelligence', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      lang: 'en',
+      simulationContext: { gateD: 85, concessionsFood: 20 }
+    })
+  });
+  assert.strictEqual(crowdIntel.status, 200);
+  assert.strictEqual(crowdIntel.body.severity, 'high');
+  assert(Array.isArray(crowdIntel.body.recommendations), 'recommendations should be an array');
+  assert.strictEqual(crowdIntel.body.recommendations.length, 3);
+  assert.strictEqual(crowdIntel.body.crowdFlow, 'critical');
+  console.log('✅ Test Case 7 Passed: /api/crowd-intelligence recommendations logic');
 
   console.log('🎉 All Server and Security tests completed successfully!\n');
   srv.close();

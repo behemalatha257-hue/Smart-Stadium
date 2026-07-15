@@ -33,6 +33,25 @@ try {
   assert.strictEqual(treesFlight, 7);
   console.log('✅ Test Case 5 Passed: Tree offset for large emissions');
 
+  // Test Case 6: Negative and zero travel distance safety checks
+  const negativeCo2 = calculateCarbonFootprint('gas-car', -25);
+  assert.strictEqual(negativeCo2, 0.00, 'Negative distance must result in 0.00 CO2 emissions');
+  const zeroCo2 = calculateCarbonFootprint('metro', 0);
+  assert.strictEqual(zeroCo2, 0.00, 'Zero distance must result in 0.00 CO2 emissions');
+  console.log('✅ Test Case 6 Passed: Negative and zero distance calculations');
+
+  // Test Case 7: Unknown transit mode fallback
+  const unknownCo2 = calculateCarbonFootprint('teleporter-mode', 10);
+  assert.strictEqual(unknownCo2, 2.10, 'Unknown transit mode must fallback to gasoline car emissions (0.21 kg/km)');
+  console.log('✅ Test Case 7 Passed: Unknown transit mode fallback');
+
+  // Test Case 8: Non-numeric inputs handling
+  const nanCo2 = calculateCarbonFootprint('bus', 'not-a-number');
+  assert.strictEqual(nanCo2, 0.00, 'Non-numeric distance must resolve to 0.00 CO2 emissions');
+  const nanTrees = convertToTreeOffset('invalid-co2');
+  assert.strictEqual(nanTrees, 0, 'Non-numeric CO2 value must resolve to 0 trees');
+  console.log('✅ Test Case 8 Passed: Non-numeric input safety fallbacks');
+
   console.log('🎉 All Sustainability Calculation Tests Passed!\n');
 } catch (e) {
   console.error('❌ Sustainability Calculation Tests Failed!');

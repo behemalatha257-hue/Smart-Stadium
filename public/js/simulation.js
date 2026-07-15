@@ -1,14 +1,44 @@
 /**
- * Live Stadium Simulation Engine
- * Manages wait times, gate status, and operational incident scenarios.
+ * @module simulation
+ * @description Live Stadium Simulation Engine for the FIFA World Cup 2026 venue.
+ * Manages live stadium state including attendance, gate congestion, queue wait times,
+ * restroom utilization, active incidents, and green transit usage ratios.
  */
 
-// Initial Simulation State
+/**
+ * @typedef {Object} SimulationState
+ * @property {number} attendance - Total number of fans currently in the stadium
+ * @property {number} capacityLimit - Absolute maximum capacity of the match venue
+ * @property {number} gateA - Gate A congestion percentage (0 to 100)
+ * @property {number} gateAWait - Gate A wait time in minutes
+ * @property {string} gateAStatus - Gate A warning status ('Normal' | 'Busy' | 'Critical')
+ * @property {number} gateB - Gate B congestion percentage (0 to 100)
+ * @property {number} gateBWait - Gate B wait time in minutes
+ * @property {string} gateBStatus - Gate B warning status
+ * @property {number} gateC - Gate C congestion percentage (0 to 100)
+ * @property {number} gateCWait - Gate C wait time in minutes
+ * @property {string} gateCStatus - Gate C warning status
+ * @property {number} gateD - Gate D congestion percentage (0 to 100)
+ * @property {number} gateDWait - Gate D wait time in minutes
+ * @property {string} gateDStatus - Gate D warning status
+ * @property {number} concessionsFood - Concessions food queue wait time in minutes
+ * @property {number} concessionsDrink - Concessions drink queue wait time in minutes
+ * @property {string} restroomsS1 - Restrooms Sector 1 utilization ('Normal' | 'Busy')
+ * @property {string} restroomsS2 - Restrooms Sector 2 utilization ('Normal' | 'Busy')
+ * @property {string} activeIncident - Explanatory description of any current active issues
+ * @property {number} activeIncidentCount - Count of ongoing active warning indicators (0 or 1)
+ * @property {number} greenShuttleUsage - Ratio of fans opting for eco-friendly transit (0 to 100)
+ */
+
+/**
+ * Live simulation state storage. Protected from direct reference leak by copy clones.
+ * @type {SimulationState}
+ */
 let state = {
   attendance: 74200,
   capacityLimit: 80000,
-  gateA: 20,       // Congestion %
-  gateAWait: 5,    // Wait Time in mins
+  gateA: 20,
+  gateAWait: 5,
   gateAStatus: 'Normal',
   gateB: 35,
   gateBWait: 10,
@@ -19,16 +49,19 @@ let state = {
   gateD: 40,
   gateDWait: 12,
   gateDStatus: 'Normal',
-  concessionsFood: 8,   // Wait Time in mins
+  concessionsFood: 8,
   concessionsDrink: 4,
-  restroomsS1: 'Normal', // Congestion 'Normal' | 'Busy'
+  restroomsS1: 'Normal',
   restroomsS2: 'Normal',
   activeIncident: 'None. All systems green.',
   activeIncidentCount: 0,
-  greenShuttleUsage: 45 // Percentage (0-100)
+  greenShuttleUsage: 45
 };
 
-// Scenario Database
+/**
+ * Scenario Database containing preconfigured matchday events and incidents.
+ * @constant {Object<string, Partial<SimulationState>>}
+ */
 const SCENARIOS = {
   normal: {
     attendance: 74200,
@@ -93,16 +126,21 @@ const SCENARIOS = {
 };
 
 /**
- * Returns copy of the current state of the simulation.
+ * Returns a cloned copy of the current state of the stadium simulation.
+ * Avoids reference leak to protect state isolation.
+ *
+ * @returns {SimulationState} Deep copy of simulation state
  */
 export function getSimulationState() {
-  return { ...state };
+  return JSON.parse(JSON.stringify(state));
 }
 
 /**
- * Updates the state based on the selected scenario.
- * @param {string} scenarioName - 'normal' | 'halftime' | 'gated' | 'incident' | 'transit'
- * @returns {object} - Updated state
+ * Updates the active simulator state based on the selected scenario identifier.
+ * Safe against unknown scenario names.
+ *
+ * @param {string} scenarioName - Predefined key ('normal' | 'halftime' | 'gated' | 'incident' | 'transit')
+ * @returns {SimulationState} Copy of the newly updated state
  */
 export function setScenario(scenarioName) {
   if (SCENARIOS[scenarioName]) {
@@ -112,22 +150,26 @@ export function setScenario(scenarioName) {
 }
 
 /**
- * Returns wait time rating (text representation) based on threshold
- * @param {number} waitMins - wait time in minutes
- * @returns {string} - 'low' | 'medium' | 'high'
+ * Maps a gate queue wait duration in minutes to a simple rating classification.
+ *
+ * @param {number} waitMins - Queue time in minutes
+ * @returns {string} Rating tag ('low' | 'medium' | 'high')
  */
 export function getWaitTimeRating(waitMins) {
-  if (waitMins <= 5) return 'low';
-  if (waitMins <= 15) return 'medium';
+  const safeWait = Math.max(0, Number(waitMins) || 0);
+  if (safeWait <= 5) return 'low';
+  if (safeWait <= 15) return 'medium';
   return 'high';
 }
 
 /**
- * Updates green shuttle percentage dynamically based on user pledges.
- * @param {number} deltaPercent - change to apply
- * @returns {object} - Updated state
+ * Adjusts green transit usage percentage boundaries (0% to 100%) based on fan pledges.
+ *
+ * @param {number} deltaPercent - Positive or negative shift percentage
+ * @returns {SimulationState} Copy of the newly updated state
  */
 export function adjustGreenShuttleUsage(deltaPercent) {
-  state.greenShuttleUsage = Math.min(100, Math.max(0, state.greenShuttleUsage + deltaPercent));
+  const parsedDelta = Number(deltaPercent) || 0;
+  state.greenShuttleUsage = Math.min(100, Math.max(0, state.greenShuttleUsage + parsedDelta));
   return getSimulationState();
 }
